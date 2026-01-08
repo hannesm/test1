@@ -34,9 +34,9 @@ jobs:
 
       - name: Check and run advisories
         run: |
-          git fetch origin ${{ github.base_ref }}
-          CHANGED_FILES=$(git diff --name-only -r HEAD^1 HEAD | grep advisories)
-          for x in $CHANGED_FILES; do
+          opam repository add main git+https://github.com/ocaml/opam-repository.git
+          opam repository add archive git+https://github.com/ocaml/opam-repository-archive.git
+          for x in $(find advisories/ -type f); do
             echo "Converting advisory $x"
             opam exec -- advisories $x > $x.json
             echo "Validating advisory $x.json"
