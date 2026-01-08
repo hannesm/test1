@@ -1,0 +1,69 @@
+name: generate_osv
+
+on: [push]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        ocaml-version: ["4.14.2"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Use OCaml ${{ matrix.ocaml-version }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ matrix.ocaml-version }}
+
+      - name: Install advisories
+        run: opam pin add --confirm-level=unsafe-yes https://github.com/hannesm/advisories.git
+
+      - name: Fetch OSV schema
+        run: curl -OL https://raw.githubusercontent.com/ossf/osv-schema/refs/heads/main/validation/schema.json
+
+      - name: Install check-jsonschema
+        run: pipx install check-jsonschema
+
+      - name: Check and run advisories
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only -r HEAD^1 HEAD | grep advisories)
+          for x in $CHANGED_FILES; do
+            echo "Converting advisory $x"
+            opam exec -- advisories $x > $x.json
+            echo "Validating advisory $x.json"
+            check-jsonschema --schemafile ./schema.json $x.json
+            echo "Done with exit code $?"
+            YEAR=$(echo $x | cut -d '/' -f 2)
+            mkdir -p osv/$YEAR
+            BASE=$(basename $x)
+            TARGET=$(echo "osv/$YEAR/${BASE/md/json}")
+            echo "Moving to $TARGET"
+            mv $x.json $TARGET
+          done
+      - name: Publish OSV data
+        if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          DATA_DIR=$PWD/osv
+          BRANCH=generated-osv
+          REF=refs/remotes/origin/$BRANCH
+          export GIT_WORK_TREE=$DATA_DIR
+          git read-tree "$REF"
+          git add --all --intent-to-add
+          git diff --quiet && exit
+          git add --all
+          TREE=$(git write-tree)
+          git config user.email security-advisories@ocaml.org
+          git config user.name "OCaml Security Response Team"
+          COMMIT=$(git commit-tree "$TREE" -p "$REF" -m "$(date --utc --rfc-3339=seconds) ($GITHUB_SHA)")
+          git push origin $COMMIT:$BRANCH

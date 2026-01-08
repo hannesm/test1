@@ -1,0 +1,47 @@
+name: validate_advisory
+
+on: [pull_request]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        ocaml-version: ["4.14.2"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Use OCaml ${{ matrix.ocaml-version }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ matrix.ocaml-version }}
+
+      - name: Install advisories
+        run: opam pin add --confirm-level=unsafe-yes https://github.com/hannesm/advisories.git
+
+      - name: Fetch OSV schema
+        run: curl -OL https://raw.githubusercontent.com/ossf/osv-schema/refs/heads/main/validation/schema.json
+
+      - name: Install check-jsonschema
+        run: pipx install check-jsonschema
+
+      - name: Check and run advisories
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only -r HEAD^1 HEAD | grep advisories)
+          for x in $CHANGED_FILES; do
+            echo "Converting advisory $x"
+            opam exec -- advisories $x > $x.json
+            echo "Advisory is:"
+            cat $x.json | jq
+            echo "Validating advisory $x.json"
+            check-jsonschema --schemafile ./schema.json $x.json
+            echo "Done with exit code $?"
+          done
