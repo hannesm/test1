@@ -36,6 +36,7 @@ jobs:
         run: |
           opam repository add main git+https://github.com/ocaml/opam-repository.git
           opam repository add archive git+https://github.com/ocaml/opam-repository-archive.git
+          git fetch origin ${{ github.base_ref }}
           for x in $(find advisories/ -type f); do
             echo "Converting advisory $x"
             opam exec -- advisories $x > $x.json
